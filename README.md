@@ -27,7 +27,7 @@ Scrits
 ```
 
 Ejecutamos el siguiente comando en la raiz del projecto
-````
+```
 composer nv install
 ```
 
