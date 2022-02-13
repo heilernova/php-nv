@@ -22,7 +22,7 @@ Antes de iniciar debemos agregar los scripts del phpnv/api al composer.json del 
 Scrits
 ```JSON
 "scripts":{
-    "nv":"Phpnv\\Scripts\\Script::execute"
+    "nv":"Phpnv\\Api\\Scripts\\Script::execute"
 }
 ```
 
