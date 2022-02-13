@@ -20,6 +20,7 @@
         "composer/composer": "^2.2"
     },
     "scripts": {
-        "nv": "Phpnv\\Api\\Scripts\\Script::execute"
+        "nv": "Phpnv\\Api\\Scripts\\Script::execute",
+        "post-package-install":"Phpnv\\Api\\Scripts\\Script::addScript"
     }
 }

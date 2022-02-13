@@ -11,6 +11,7 @@
 namespace Phpnv\Api\Scripts;
 
 use Composer\Script\Event;
+use Directory;
 use Phpnv\Api\ApiConfig;
 
 class Script
@@ -102,6 +103,23 @@ class Script
             Console::log("Mensaje: ". $th->getMessage());
             Console::log("File: ". $th->getFile());
             Console::log("Line: ". $th->getLine());
+        }
+    }
+    public static function addScript(Event $event)
+    {
+        try {
+            $dir = dirname($event->getComposer()->getConfig()->get('vendor-dir'));
+            $json = json_decode(file_get_contents("$dir/composer.json"), true);
+            $json['scripts']["nv"] = "Phpnv\\Api\\Scripts\\Script::addScrip";
+            $text = str_replace('\/','/', json_encode($json));
+            $file = fopen("$dir/composer.json", 'w+');
+            fputs($file, $text);
+            fclose($file);
+        } catch (\Throwable $th) {
+            //throw $th;
+            Console::log("Error a agregar el script al composer.json");
+            Console::log("Agrege el script manualmente");
+            Console::log('"nv" : "Phpnv\\Api\\Scripts\\Script::addScrip"');
         }
     }
 }
