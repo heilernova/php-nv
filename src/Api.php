@@ -21,6 +21,11 @@ class Api
     private static string $dir = '';
     private static ApiInfo $apiInfo;
     private static ApiConfig $config;
+
+    /**
+     * @param string $url enviada por el cliente
+     * @param string $dir Ruta del direcctorio donde se ejecuta la api se recomiendo usar __DIR__
+     */
     public static function run(string $url, string $dir)
     {
         self::$dir = $dir;

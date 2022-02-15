@@ -13,7 +13,6 @@ namespace Phpnv\Api\Data;
 use mysqli;
 use mysqli_result;
 use mysqli_stmt;
-use PDO;
 use Phpnv\Api\ApiException;
 use ReflectionMethod;
 use Throwable;
@@ -21,10 +20,10 @@ use Throwable;
 class Database
 {
     private mysqli|null $dbMysql = null;
-    private DatabaseExecute $databaseQuery;
     private array $errorList = [];
     private mysqli_stmt $stmt;
     private string|null $lastCommand = null;
+    private string $defaultTable;
 
     /**
      * @param string $type Tipo de base de datos [ mysql, sqlserver.].
@@ -33,9 +32,11 @@ class Database
     public function __construct(private string $type,private array $dataConnection)
     {
         if ($type != 'mysql') throw new ApiException(['No hay soperte para el tipo de la base de datos', "tipo: $type"]);
-        $this->databaseQuery = new DatabaseExecute($this);
     }
 
+    /**
+     * Retorna el objecto msqli que representa una conexion de una base de datos de MySQL.
+     */
     public function getConnection():mysqli
     {
         if ($this->dbMysql){
@@ -43,7 +44,7 @@ class Database
         }else{
             try {
                 $dataConnection = $this->dataConnection;
-                $this->dbMysql = mysqli_connect(
+                $this->dbMysql = @mysqli_connect(
                     $dataConnection['hostname'],
                     $dataConnection['username'],
                     $dataConnection['password'],
@@ -68,7 +69,7 @@ class Database
     }
 
     /**
-     * Ejecuta una consulta en la base de datos.
+     * Ejecuta una consulta preparada en la base de datos.
      * @param string $slq comando sql a ejecutar.
      * @param array $params Paramentros de la consulta sql.
      */
@@ -78,13 +79,16 @@ class Database
     }
 
     /**
-     * Llama un objeto para ejecutar consultas en la base de datos.
+     * Retorna un array de los errores obtenidos durecnte las consultas sql.
      */
-    public function execute():DatabaseExecute
+    public function getErrors():array
     {
-        return $this->databaseQuery;
+        return $this->errorList;
     }
 
+    /**
+     * Confima y ejecuta los cambios realizados en la en la base de datos.
+     */
     public function commit():bool{
         $this->lastCommand = null;
         return $this->dbMysql->commit();
@@ -95,32 +99,148 @@ class Database
         if ($sql == $this->lastCommand){
             $stmt = $this->stmt;
         }else{
-            $stmt = $this->getConnection()->prepare($sql);
-            $this->stmt = $stmt;
+            try {
+                $stmt = $this->getConnection()->prepare($sql);
+                $this->stmt = $stmt;
+            } catch (\Throwable $th) {
+                throw new ApiException([
+                    'Error con la prepación de la consulta sql.',
+                    "Sql command: " . $sql,
+                    $this->dbMysql->error
+                ], $th);
+            }
         }
-        if ($stmt){
-            if ($params){
-                try {
-                    $refValues = ['']; // Creamos un array con un valor vacio
-                    foreach($params as $key=>$value){
-                        $refValues[0] .= is_string($value) ? 's' : (is_int($value) ? 'i' : 'd');
-                        $refValues[] = &$params[$key];
-                    }
-                    $ref = new ReflectionMethod($stmt, 'bind_param');
-                    $ref->invokeArgs($stmt, $refValues);
-                } catch (\Throwable $th) {
-                    throw new ApiException(['Error con el bind_param', $sql], $th);
+        if ($params){
+            try {
+                $refValues = ['']; // Creamos un array con un valor vacio
+                foreach($params as $key=>$value){
+                    $refValues[0] .= is_string($value) ? 's' : (is_int($value) ? 'i' : 'd');
+                    $refValues[] = &$params[$key];
                 }
+                $ref = new ReflectionMethod($stmt, 'bind_param');
+                $ref->invokeArgs($stmt, $refValues);
+            } catch (\Throwable $th) {
+                throw new ApiException(['Error con el bind_param', $sql], $th);
             }
-            if ($stmt->execute()){
-                $result = $stmt->get_result();
-                return $result ? $result : true;
-            }else{
-                $this->errorList[] = ["Sql command: $sql", "parametros: " . json_encode($params)];
-                return false;
-            }
-        }else{
-            throw new ApiException(['Error con la prepación de la consulta sql.', $this->dbMysql->error]);
         }
+        try{
+            $ok = $stmt->execute();
+            $result = $stmt->get_result();
+            return $result ? $result : $ok;
+        } catch(\Throwable $th){
+            $this->errorList[$stmt->id] = (object)[
+                "sqlCommand" =>$sql, 
+                "params" => $params,
+                "message" => $stmt->error
+            ];
+            return false;
+        }
+    }
+
+    /**
+     * Estable la tabla por defecto para realizar consultas sql en la base de datos.
+     */
+    public function setDefaultTable(string $table):void
+    {
+        $this->defaultTable = $table;
+    }
+
+    // Métodos de ayuda para ejecuciones simples insert, update, delete, procedura, function.
+    // --------------------------------------------------------------------------------------
+
+    /**
+     * Arma y ejecuta un select en la base de datos con los parametros ingresados.
+     * @param string $table Nombre de la tabla por default es la tabla establecida por defecto con setDefaultTable
+     * @param string|array $fields Campos o array de los campos a seleccionar de la tabla por defecto es "*".
+     * @param string|array $condition Condición where de la filas a seleccionas, puese ser un string o un array 
+     * donde el primer item es un string con la condicion preparadao y el segundo un array con los parametros.
+     */
+    public function select($table = null, array $fields = null, string|array $condition = null):DatabaseResult
+    {
+        if (!$table) $table = $this->defaultTable;
+        if ($fields){
+            $fields_tempo = '';
+            foreach ($fields as $element){
+                $fields_tempo .= ", `$element`";
+            }
+            $fields .= ltrim($fields_tempo, ', ');
+        }else{
+            $fields = '*';
+        }
+        $result = $this->queryMySql("SELECT $fields FROM $table");
+        return new DatabaseResult($result, $this->stmt->insert_id, $this->stmt->affected_rows);
+    }
+
+    /**
+     * @param array|object $params Un array asositativo o un objeto con los parametros.
+     * @param string $table Por defecto es el nombre de la tabla establecido.
+     */
+    public function insert(array|object $params, string $table = null):DatabaseResult
+    {
+        if (!$table) $table = $this->defaultTable;
+        $fields = '';
+        $values = '';
+        foreach ($params as $key=>$value){
+            $fields .= ", `$key`";
+            $values .= ", ?";
+        }
+        $fields = ltrim($fields, ', ');
+        $values = ltrim($values, ', ');
+        $result = $this->queryMySql("INSERT INTO $table($fields) VALUES($values)", (array)$params);
+        return new DatabaseResult($result, $this->stmt->insert_id, $this->stmt->affected_rows);
+    }
+
+    /**
+     * @param array|object $params array asociativo o un objecto con los parametros a editar.
+     * @param string|array $condition Condición where de la filas a seleccionas, puese ser un string o un array 
+     * donde el primer item es un string con la condicion preparadao y el segundo un array con los parametros.
+     */
+    public function update(array|object $params, string|array $condition, string $table = null):DatabaseResult
+    {
+        if (!$table) $table = $this->defaultTable;
+        $values = '';
+        foreach ($params as $key=>$value){
+            $values .= ", `$key`=?";
+        }
+        $values = ltrim($values, ', ');
+        if (is_string($condition)){
+            $condition = [$condition,null];
+        }
+        if (isset($condition[1])) $params = array_merge((array)$params, (array)$condition[1]);
+        $result = $this->queryMySql("UPDATE $table SET $values WHERE " . $condition[0], $params);
+        return new DatabaseResult($result, $this->stmt->insert_id, $this->stmt->affected_rows);
+    }
+
+    /**
+     * @param string|array $condition Condición where de la filas a seleccionas, puese ser un string o un array 
+     * donde el primer item es un string con la condicion preparadao y el segundo un array con los parametros.
+     */
+    public function delete(array $condition, string $table = null):DatabaseResult
+    {
+        if (!$table) $table = $this->defaultTable;
+        $result = $this->queryMySql("DELETE FROM $table WHERE " . $condition[0], $condition[1] ?? null);
+        return new DatabaseResult($result, $this->stmt->insert_id, $this->stmt->affected_rows);
+    }
+
+    /**
+     * @param string $name Nombre de la funcion a ejecutar.
+     * @param array $params array de los parametros
+     */
+    public function function(string $name, array $params = null):DatabaseResult
+    {
+        $p = '';
+        if ($params) $p = ltrim(str_repeat(', ?', count($params)), ', ');
+        return new DatabaseResult($this->queryMySql("SELECT $name($p)", $params), $this->stmt->insert_id, $this->stmt->affected_rows);
+    }
+
+    /**
+     * @param string $name Nombre del procedimiento a ejecutar.
+     * @param array $params array de los parametros
+     */
+    public function procedure(string $name, array $params = null):DatabaseResult
+    {
+        $p = '';
+        if ($params) $p = ltrim(str_repeat(', ?', count($params)), ', ');
+        return new DatabaseResult($this->queryMySql("CALL $name($p)", $params), $this->stmt->insert_id, $this->stmt->affected_rows);
     }
 }

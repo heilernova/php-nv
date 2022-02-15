@@ -14,14 +14,8 @@ use mysqli_result;
 
 class DatabaseResult
 {
-    public $status = false;
-    public $insertId = 0;
-    public $affectedRows = 0;
-
-    public function __construct(private ?mysqli_result $result = null)
-    {
-       
-    }
+    public function __construct(public bool|mysqli_result $result, public int $insertId = 0, public int  $affectedRows = 0)
+    {}
 
     /**
      * Obtiene le objeto mysqli_result de la consulta realizada
@@ -66,6 +60,14 @@ class DatabaseResult
      * Retorna un array numerico de la primera fila del resultado de la cosulta sql.
      */
     public function fetchArray():array|false|null{
-        return $this->result->fetch_array();
+        return $this->result->fetch_array(MYSQLI_NUM);
+    }
+
+    /**
+     * Retorna un objeto del resultado de la consulta sql.
+     */
+    public function fecthObject(string $class = 'stdClass', ?array $constructor_args = null):object|false|null
+    {
+        return $this->result->fetch_object($class, $constructor_args);
     }
 }

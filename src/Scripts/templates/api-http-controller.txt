@@ -6,7 +6,7 @@ use Phpnv\Api\Response;
 
 class $ClassController extends BaseController
 {
-    
+    /** Método constructor */
     function __construct()
     {
         parent::__construct();

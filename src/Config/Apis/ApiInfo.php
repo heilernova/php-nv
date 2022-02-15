@@ -13,6 +13,7 @@ namespace Phpnv\Api\Config\Apis;
 use Phpnv\Api\Api;
 use Phpnv\Api\Config\Databases\DatabaseInfo;
 use Phpnv\Api\Data\Database;
+use Stringable;
 
 class ApiInfo
 {
@@ -48,9 +49,14 @@ class ApiInfo
     /**
      * Retorna el directorio donde se encuentra alojados los componentes de la api.
      */
-    public function GetDirFull():string
+    public function getDirFull():string
     {
-        return Api::getDir() . ($this->dir == 'api' ? '' : "/$this->name");
+        return Api::getDir() . "/$this->name";
+    }
+
+    public function getResourcesDir():string
+    {
+        return Api::getDir() . "/$this->resourcesDir";
     }
 
     /**
